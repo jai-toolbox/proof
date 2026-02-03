@@ -5,6 +5,7 @@ Proof_Line :: struct {
 }
 
 // note that these types are pointers to functions that have this signature.
+// also note that functions are defined at compile time, so pointers pointing to constant data.
 Line_Rule :: #type (inputs: []*Formula, claimed: *Formula) -> *Formula;
 Proof_Modification_Rule :: #type (proof: *Proof, terms: []*Term);
 
@@ -18,14 +19,22 @@ Proof :: struct {
     target_rules: Table(string, Proof_Modification_Rule);
 }
 
-Rule_Error :: struct {
-    message: string;
-}
-
+/*
+ A
+ --
+ A 
+*/
+// note: this is probably redundant, but for some reason we need this, and that reason is probably wrong.
 assumption_rule :: (inputs: []*Formula, claimed: *Formula) -> *Formula {
     return claimed;
 }
 
+/*
+ A
+ B
+ -------
+ A and B
+*/
 and_rule :: (inputs: []*Formula, claimed: *Formula) -> *Formula {
     if inputs.count != 2 {
         print("AND rule needs 2 inputs\n");
@@ -42,6 +51,9 @@ and_rule :: (inputs: []*Formula, claimed: *Formula) -> *Formula {
     return claimed;
 }
 
+/*
+ BLAH = BLAH
+*/
 eq_rule :: (inputs: []*Formula, claimed: *Formula) -> *Formula {
     if inputs.count != 0 {
         print("EQ_SIMPLIFY rule takes no inputs\n");
@@ -61,6 +73,8 @@ eq_rule :: (inputs: []*Formula, claimed: *Formula) -> *Formula {
     return claimed;
 }
 
+// if your target is A => B, then you can make your goal B, and get the assumption A, 
+// I don't think this function does that though, could be old and needs updating.
 implication_intro_rule :: (inputs: []*Formula, current_target: *Formula) -> *Formula {
     if current_target.kind != .IMPLIES {
         print("implication_intro: target is not an implication A -> B\n");
@@ -70,6 +84,12 @@ implication_intro_rule :: (inputs: []*Formula, current_target: *Formula) -> *For
     return current_target.implies.r;
 }
 
+/*
+ forall n in N, P(n)
+ k in N 
+ -------
+ P(k)
+*/
 forall_rule :: (inputs: []*Formula, claimed: *Formula) -> *Formula {
     if inputs.count != 2 {
         print("FORALL rule requires 2 inputs: a forall and a term membership fact\n");
@@ -107,6 +127,12 @@ forall_rule :: (inputs: []*Formula, claimed: *Formula) -> *Formula {
     return claimed;
 }
 
+/*
+ A => B
+ A
+ ------
+ B
+*/
 implies_rule :: (inputs: []*Formula, claimed: *Formula) -> *Formula {
     if inputs.count != 2 {
         print("IMPLIES rule requires 2 inputs: an implication and its antecedent\n");
@@ -134,6 +160,10 @@ implies_rule :: (inputs: []*Formula, claimed: *Formula) -> *Formula {
     return claimed;
 }
 
+/*
+ ------
+ X or (not X)
+*/
 excluded_middle_rule :: (inputs: []*Formula, claimed: *Formula) -> *Formula {
     if inputs.count != 0 {
         print("LEM requires no inputs\n");
@@ -158,6 +188,15 @@ excluded_middle_rule :: (inputs: []*Formula, claimed: *Formula) -> *Formula {
     return claimed;
 }
 
+
+/*
+ X -> Y
+ (not X) -> Y
+ ------
+ Y
+*/
+// you've proven that no matter the value of X, that Y holds true
+// this probably needs to be generalized to things which have a finite number of values.
 cases_rule :: (inputs: []*Formula, claimed: *Formula) -> *Formula {
     if inputs.count != 2 {
         print("CASES requires 2 inputs: (f -> t) and (¬f -> t)\n");
@@ -197,6 +236,12 @@ cases_rule :: (inputs: []*Formula, claimed: *Formula) -> *Formula {
     return claimed;
 }
 
+/*
+ P(0)
+ forall k in N, P(k) => P(k+1)
+ ------
+ forall n in N, P(n)
+*/
 induction_rule :: (inputs: []*Formula, claimed: *Formula) -> *Formula {
     if inputs.count != 2 {
         print("INDUCTION requires 2 inputs: base P(0) and step ∀k(P(k) → P(k+1))\n");
