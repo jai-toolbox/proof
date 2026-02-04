@@ -50,6 +50,8 @@ Exists_Formula :: struct {
     inner: *Formula;
 }
 
+// todo: I don't think I like this very much, instead I want to do what jai does in most cases
+// and just embed the kind directly into the right type
 Formula :: struct {
     kind: Formula_Kind;
     using data: union {

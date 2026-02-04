@@ -15,7 +15,10 @@ Proof :: struct {
     active_target_idx: int;
     lines: [..]Proof_Line;
     target_history: [..][..]*Formula;
+    // we should use an enum to rule map instead.
     rules: Table(string, Line_Rule);
+
+    // these modify the target
     target_rules: Table(string, Proof_Modification_Rule);
 }
 
@@ -126,6 +129,72 @@ forall_rule :: (inputs: []*Formula, claimed: *Formula) -> *Formula {
     
     return claimed;
 }
+
+/*
+ (forall x1 in X1) ( (forall x2 in X2) ( ... (forall xn in Xn) ( P(x1, x2, ..., xn) ) )  )
+ k1 in X1
+ k2 in X2
+ ...
+ kn in Xn
+ -------
+ P(k1, k2, ..., kn)
+*/
+generalized_forall_rule :: (inputs: []*Formula, claimed: *Formula) -> *Formula {
+
+    if inputs.count < 2 {
+        print("generalized forall requires at least 2 elements, ");
+        return null;
+    }
+    
+    if inputs[0].kind != .FORALL {
+        print("First input must be a forall formula\n");
+        return null;
+    }
+
+    current_unwrapped_formula : *Formula = inputs[0];
+    num_membership_relations := inputs.count - 1;
+
+    for index : 1..num_membership_relations {
+
+        if current_unwrapped_formula.kind != .FORALL {
+            log("you passed in too many element membership formula to instantiate the forall");
+            return null;
+        }
+
+        current_forall := current_unwrapped_formula.forall;
+
+        formula := inputs[index];
+        isnt_membership := formula.kind != .RELATION || formula.relation.args.count != 2 || formula.relation.R != SYM_IN;
+
+        if isnt_membership {
+            print("the formula % wasn't an element membership formula", formula.*);
+            return null;
+        }
+
+        elem := formula.relation.args[0];
+        domain := formula.relation.args[1];
+        
+        if term_to_string(current_forall.domain) != term_to_string(domain) {
+            print("Element's domain does not match forall domain \n");
+            return null;
+        }
+
+        // at this point we've verified that we can now do the substitution.
+        
+        var_term := make_variable(current_forall.v);
+        current_unwrapped_formula = substitute_in_formula(current_forall.inner, var_term, elem);
+    }
+
+    if formula_to_string(current_unwrapped_formula) != formula_to_string(claimed) {
+        print("Claimed formula % does not match derived formula %\n", 
+              formula_to_string(claimed), formula_to_string(current_unwrapped_formula));
+        return null;
+    }
+
+    return claimed;
+}
+
+
 
 /*
  A => B
@@ -361,8 +430,10 @@ create_proof :: (assumptions: []*Formula, target: *Formula) -> Proof {
         // This is a simplified version - in practice you'd need context
         return claimed;
     });
+    // TODO: we should replace these with enums so that we get proper errors, lazy for now
     register_rule(*proof, "IMPLIES", implies_rule);
     register_rule(*proof, "FORALL", forall_rule);
+    register_rule(*proof, "GENERALIZED_FORALL", generalized_forall_rule);
     register_rule(*proof, "EQ", eq_rule);
     register_rule(*proof, "AND", and_rule);
     
@@ -425,6 +496,8 @@ add_line_to_proof :: (proof: *Proof, claimed: *Formula, rule_name: string, deps:
         }
     }
 }
+
+// instantiations all modify the target.
 
 instantiate_forall :: (proof: *Proof, requested_variable: *Term = null) {
     if proof.targets.count == 0 {
