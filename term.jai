@@ -136,28 +136,28 @@ term_to_string :: (t: *Term) -> string {
 
 term_is_well_formed :: (t: *Term, err: *string = null) -> bool {
     if !t {
-        if err then <<err = "null term";
+        if err then err.* = "null term";
         return false;
     }
     
     if t.kind == {
         case .VARIABLE;
             if !is_variable(t.variable.var) {
-                if err then <<err = "bad var";
+                if err then err.* = "bad var";
                 return false;
             }
             return true;
             
         case .CONSTANT;
             if !is_constant_(t.constant.c) {
-                if err then <<err = "bad const";
+                if err then err.* = "bad const";
                 return false;
             }
             return true;
             
         case .FUNCTION;
             if !is_function(t.function_term.f, t.function_term.args.count) {
-                if err then <<err = "bad function/arity";
+                if err then err.* = "bad function/arity";
                 return false;
             }
             for arg: t.function_term.args {

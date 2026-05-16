@@ -470,7 +470,7 @@ add_line_to_proof :: (proof: *Proof, claimed: *Formula, rule_name: string, deps:
             return;
         }
     } else {
-        derived := (<<rule)(dep_statements, claimed);
+        derived := (rule.*)(dep_statements, claimed);
         if !derived || formula_to_string(derived) != formula_to_string(claimed) {
             print("Claimed statement does not match derived\n");
             return;

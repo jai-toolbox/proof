@@ -250,7 +250,7 @@ formula_to_string :: (f: *Formula) -> string {
 
 formula_is_well_formed :: (f: *Formula, err: *string = null) -> bool {
     if !f {
-        if err then <<err = "null formula";
+        if err then err.* = "null formula";
         return false;
     }
     
@@ -260,7 +260,7 @@ formula_is_well_formed :: (f: *Formula, err: *string = null) -> bool {
             
         case .RELATION;
             if !is_relation(f.relation.R, f.relation.args.count) {
-                if err then <<err = "bad relation/arity";
+                if err then err.* = "bad relation/arity";
                 return false;
             }
             for arg: f.relation.args {
@@ -282,14 +282,14 @@ formula_is_well_formed :: (f: *Formula, err: *string = null) -> bool {
             
         case .FORALL;
             if !is_variable(f.forall.v) {
-                if err then <<err = "bad forall var";
+                if err then err.* = "bad forall var";
                 return false;
             }
             return formula_is_well_formed(f.forall.inner, err);
             
         case .EXISTS;
             if !is_variable(f.exists.v) {
-                if err then <<err = "bad exists var";
+                if err then err.* = "bad exists var";
                 return false;
             }
             return formula_is_well_formed(f.exists.inner, err);
