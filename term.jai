@@ -3,6 +3,7 @@ Term_Kind :: enum {
     CONSTANT;
     FUNCTION;
     TUPLE;
+    FINITE_SET;
 }
 
 Variable_Term :: struct {
@@ -22,6 +23,10 @@ Tuple_Term :: struct {
     args: [..]*Term;
 }
 
+Finite_Set_Term :: struct {
+    elements: [..]*Term;
+}
+
 Term :: struct {
     kind: Term_Kind;
     using data: union {
@@ -29,6 +34,7 @@ Term :: struct {
         constant: Constant_Term;
         function_term: Function_Term;
         tuple: Tuple_Term;
+        finite_set: Finite_Set_Term;
     };
 }
 
@@ -84,6 +90,24 @@ make_tuple_from_array :: (args: []*Term) -> *Term {
     return t;
 }
 
+make_finite_set :: (elements: ..*Term) -> *Term {
+    t := New(Term);
+    t.kind = .FINITE_SET;
+    for element: elements {
+        array_add(*t.finite_set.elements, element);
+    }
+    return t;
+}
+
+make_finite_set_from_array :: (elements: []*Term) -> *Term {
+    t := New(Term);
+    t.kind = .FINITE_SET;
+    for element: elements {
+        array_add(*t.finite_set.elements, element);
+    }
+    return t;
+}
+
 term_to_string :: (t: *Term) -> string {
     if !t return "?";
     
@@ -97,7 +121,7 @@ term_to_string :: (t: *Term) -> string {
             return t.constant.c;
             
         case .FUNCTION;
-            is_infix := (t.function_term.f == "+" || t.function_term.f == "*" || t.function_term.f == SYM_IN);
+            is_infix := (t.function_term.f == "+" || t.function_term.f == "-" || t.function_term.f == "*" || t.function_term.f == "/" || t.function_term.f == SYM_IN);
             if is_infix && t.function_term.args.count == 2 {
                 append(*builder, "(");
                 append(*builder, term_to_string(t.function_term.args[0]));
@@ -106,6 +130,18 @@ term_to_string :: (t: *Term) -> string {
                 append(*builder, " ");
                 append(*builder, term_to_string(t.function_term.args[1]));
                 append(*builder, ")");
+            } else if t.function_term.f == "domain" && t.function_term.args.count == 1 {
+                append(*builder, "domain(");
+                append(*builder, term_to_string(t.function_term.args[0]));
+                append(*builder, ")");
+            } else if t.function_term.f == "image" && t.function_term.args.count == 1 {
+                append(*builder, "image(");
+                append(*builder, term_to_string(t.function_term.args[0]));
+                append(*builder, ")");
+            } else if t.function_term.f == "card" && t.function_term.args.count == 1 {
+                append(*builder, "|");
+                append(*builder, term_to_string(t.function_term.args[0]));
+                append(*builder, "|");
             } else {
                 append(*builder, t.function_term.f);
                 append(*builder, "(");
@@ -128,6 +164,17 @@ term_to_string :: (t: *Term) -> string {
                 }
             }
             append(*builder, ")");
+            return builder_to_string(*builder);
+
+        case .FINITE_SET;
+            append(*builder, "{");
+            for element, i: t.finite_set.elements {
+                append(*builder, term_to_string(element));
+                if i + 1 < t.finite_set.elements.count {
+                    append(*builder, ", ");
+                }
+            }
+            append(*builder, "}");
             return builder_to_string(*builder);
     }
     
@@ -170,6 +217,12 @@ term_is_well_formed :: (t: *Term, err: *string = null) -> bool {
                 if !term_is_well_formed(arg, err) return false;
             }
             return true;
+
+        case .FINITE_SET;
+            for element: t.finite_set.elements {
+                if !term_is_well_formed(element, err) return false;
+            }
+            return true;
     }
     
     return false;
@@ -191,6 +244,10 @@ occurs_in_term :: (v: string, t: *Term) -> bool {
             for arg: t.tuple.args {
                 if occurs_in_term(v, arg) return true;
             }
+        case .FINITE_SET;
+            for element: t.finite_set.elements {
+                if occurs_in_term(v, element) return true;
+            }
     }
     return false;
 }
@@ -208,6 +265,10 @@ collect_vars_in_term :: (t: *Term, vars: *Table(string, bool)) {
         case .TUPLE;
             for arg: t.tuple.args {
                 collect_vars_in_term(arg, vars);
+            }
+        case .FINITE_SET;
+            for element: t.finite_set.elements {
+                collect_vars_in_term(element, vars);
             }
     }
 }
@@ -233,6 +294,56 @@ substitute_term_in_term :: (u: *Term, pattern: *Term, replacement: *Term) -> *Te
                 array_add(*new_args, substitute_term_in_term(arg, pattern, replacement));
             }
             return make_tuple_from_array(new_args);
+
+        case .FINITE_SET;
+            new_elements: [..]*Term;
+            for element: u.finite_set.elements {
+                array_add(*new_elements, substitute_term_in_term(element, pattern, replacement));
+            }
+            return make_finite_set_from_array(new_elements);
+            
+        case .VARIABLE;
+            return make_variable(u.variable.var);
+            
+        case .CONSTANT;
+            return make_constant(u.constant.c);
+    }
+    
+    return null;
+}
+
+substitute_term_occurrence_in_term :: (u: *Term, pattern: *Term, replacement: *Term, target_occurrence: int, seen: *int) -> *Term {
+    if !u return null;
+    
+    if term_to_string(u) == term_to_string(pattern) {
+        if seen.* == target_occurrence {
+            seen.* += 1;
+            return copy_term(replacement);
+        }
+        seen.* += 1;
+    }
+    
+    if u.kind == {
+        case .FUNCTION;
+            new_args: [..]*Term;
+            for arg: u.function_term.args {
+                array_add(*new_args, substitute_term_occurrence_in_term(arg, pattern, replacement, target_occurrence, seen));
+            }
+            return make_function_from_array(u.function_term.f, new_args);
+            
+        case .TUPLE;
+            new_args: [..]*Term;
+            for arg: u.tuple.args {
+                array_add(*new_args, substitute_term_occurrence_in_term(arg, pattern, replacement, target_occurrence, seen));
+            }
+            return make_tuple_from_array(new_args);
+
+        case .FINITE_SET;
+            new_elements: [..]*Term;
+            for element: u.finite_set.elements {
+                array_add(*new_elements, substitute_term_occurrence_in_term(element, pattern, replacement, target_occurrence, seen));
+            }
+            return make_finite_set_from_array(new_elements);
             
         case .VARIABLE;
             return make_variable(u.variable.var);
@@ -272,6 +383,13 @@ substitute_in_term :: (u: *Term, var: *Term, t: *Term) -> *Term {
                 array_add(*new_args, substitute_in_term(arg, var, t));
             }
             return make_tuple_from_array(new_args);
+
+        case .FINITE_SET;
+            new_elements: [..]*Term;
+            for element: u.finite_set.elements {
+                array_add(*new_elements, substitute_in_term(element, var, t));
+            }
+            return make_finite_set_from_array(new_elements);
     }
     
     return null;
@@ -297,6 +415,12 @@ copy_term :: (t: *Term) -> *Term {
                 array_add(*new_args, copy_term(arg));
             }
             return make_tuple_from_array(new_args);
+        case .FINITE_SET;
+            new_elements: [..]*Term;
+            for element: t.finite_set.elements {
+                array_add(*new_elements, copy_term(element));
+            }
+            return make_finite_set_from_array(new_elements);
     }
     return null;
 }
@@ -315,6 +439,11 @@ free_term :: (t: *Term) {
                 free_term(arg);
             }
             array_free(t.tuple.args);
+        case .FINITE_SET;
+            for element: t.finite_set.elements {
+                free_term(element);
+            }
+            array_free(t.finite_set.elements);
     }
     free(t);
 }

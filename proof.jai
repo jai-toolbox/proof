@@ -12,6 +12,7 @@ Proof_Modification_Rule :: #type (proof: *Proof, terms: []*Term);
 Proof :: struct {
     assumptions: [..]*Formula;
     targets: [..]*Formula;
+    suspended_targets: [..]*Formula;
     active_target_idx: int;
     lines: [..]Proof_Line;
     target_history: [..][..]*Formula;
@@ -54,8 +55,46 @@ and_rule :: (inputs: []*Formula, claimed: *Formula) -> *Formula {
     return claimed;
 }
 
+and_left_rule :: (inputs: []*Formula, claimed: *Formula) -> *Formula {
+    if inputs.count != 1 {
+        print("AND_LEFT needs 1 input\n");
+        return null;
+    }
+
+    if inputs[0].kind != .AND {
+        print("AND_LEFT input must be an AND\n");
+        return null;
+    }
+
+    if formula_to_string(inputs[0].and_formula.l) != formula_to_string(claimed) {
+        print("AND_LEFT claimed formula does not match left side\n");
+        return null;
+    }
+
+    return claimed;
+}
+
+and_right_rule :: (inputs: []*Formula, claimed: *Formula) -> *Formula {
+    if inputs.count != 1 {
+        print("AND_RIGHT needs 1 input\n");
+        return null;
+    }
+
+    if inputs[0].kind != .AND {
+        print("AND_RIGHT input must be an AND\n");
+        return null;
+    }
+
+    if formula_to_string(inputs[0].and_formula.r) != formula_to_string(claimed) {
+        print("AND_RIGHT claimed formula does not match right side\n");
+        return null;
+    }
+
+    return claimed;
+}
+
 /*
- BLAH = BLAH
+BLAH = BLAH
 */
 eq_rule :: (inputs: []*Formula, claimed: *Formula) -> *Formula {
     if inputs.count != 0 {
@@ -76,6 +115,67 @@ eq_rule :: (inputs: []*Formula, claimed: *Formula) -> *Formula {
     return claimed;
 }
 
+/*
+ P
+ not P
+ ------
+ contradiction
+*/
+contradiction_rule :: (inputs: []*Formula, claimed: *Formula) -> *Formula {
+    if inputs.count != 2 {
+        print("CONTRADICTION requires 2 inputs: P and not P\n");
+        return null;
+    }
+
+    if claimed.kind != .RELATION || claimed.relation.R != "contradiction" || claimed.relation.args.count != 0 {
+        print("CONTRADICTION: claimed formula must be contradiction()\n");
+        return null;
+    }
+
+    if inputs[1].kind != .NOT {
+        print("CONTRADICTION: second input must be not P\n");
+        return null;
+    }
+
+    if formula_to_string(inputs[0]) != formula_to_string(inputs[1].not_formula.inner) {
+        print("CONTRADICTION: inputs must be P and not P\n");
+        return null;
+    }
+
+    return claimed;
+}
+
+/*
+ A
+ B
+ ------
+ not (A xor B)
+*/
+xor_both_rule :: (inputs: []*Formula, claimed: *Formula) -> *Formula {
+    if inputs.count != 2 {
+        print("XOR_BOTH requires 2 inputs: A and B\n");
+        return null;
+    }
+
+    if claimed.kind != .NOT || claimed.not_formula.inner.kind != .XOR {
+        print("XOR_BOTH: claimed formula must be not (A xor B)\n");
+        return null;
+    }
+
+    xor_formula := claimed.not_formula.inner.xor_formula;
+    if formula_to_string(xor_formula.l) != formula_to_string(inputs[0]) {
+        print("XOR_BOTH: first input must match the left side of the XOR\n");
+        return null;
+    }
+
+    if formula_to_string(xor_formula.r) != formula_to_string(inputs[1]) {
+        print("XOR_BOTH: second input must match the right side of the XOR\n");
+        return null;
+    }
+
+    return claimed;
+}
+
 // if your target is A => B, then you can make your goal B, and get the assumption A, 
 // I don't think this function does that though, could be old and needs updating.
 implication_intro_rule :: (inputs: []*Formula, current_target: *Formula) -> *Formula {
@@ -85,6 +185,36 @@ implication_intro_rule :: (inputs: []*Formula, current_target: *Formula) -> *For
     }
     
     return current_target.implies.r;
+}
+
+/*
+ A
+ B
+ -------
+ A implies B
+*/
+implies_intro_line_rule :: (inputs: []*Formula, claimed: *Formula) -> *Formula {
+    if inputs.count != 2 {
+        print("IMPLIES_INTRO requires 2 inputs: assumed antecedent and derived consequent\n");
+        return null;
+    }
+
+    if claimed.kind != .IMPLIES {
+        print("IMPLIES_INTRO claimed formula must be an implication\n");
+        return null;
+    }
+
+    if formula_to_string(claimed.implies.l) != formula_to_string(inputs[0]) {
+        print("IMPLIES_INTRO first input must match implication antecedent\n");
+        return null;
+    }
+
+    if formula_to_string(claimed.implies.r) != formula_to_string(inputs[1]) {
+        print("IMPLIES_INTRO second input must match implication consequent\n");
+        return null;
+    }
+
+    return claimed;
 }
 
 /*
@@ -306,14 +436,148 @@ cases_rule :: (inputs: []*Formula, claimed: *Formula) -> *Formula {
 }
 
 /*
- P(0)
+ A or B
+ A -> C
+ B -> C
+ ------
+ C
+*/
+or_elim_rule :: (inputs: []*Formula, claimed: *Formula) -> *Formula {
+    if inputs.count != 3 {
+        print("OR_ELIM requires 3 inputs: (A or B), (A -> C), and (B -> C)\n");
+        return null;
+    }
+
+    if inputs[0].kind != .OR {
+        print("OR_ELIM: first input must be an OR\n");
+        return null;
+    }
+
+    if inputs[1].kind != .IMPLIES || inputs[2].kind != .IMPLIES {
+        print("OR_ELIM: second and third inputs must be implications\n");
+        return null;
+    }
+
+    A := inputs[0].or_formula.l;
+    B := inputs[0].or_formula.r;
+    A_imp := inputs[1].implies;
+    B_imp := inputs[2].implies;
+
+    if formula_to_string(A_imp.l) != formula_to_string(A) {
+        print("OR_ELIM: second implication must start from the left disjunct\n");
+        return null;
+    }
+
+    if formula_to_string(B_imp.l) != formula_to_string(B) {
+        print("OR_ELIM: third implication must start from the right disjunct\n");
+        return null;
+    }
+
+    if formula_to_string(A_imp.r) != formula_to_string(claimed) || formula_to_string(B_imp.r) != formula_to_string(claimed) {
+        print("OR_ELIM: both branches must derive the claimed formula\n");
+        return null;
+    }
+
+    return claimed;
+}
+
+/*
+ A xor B
+ B -> contradiction
+ ------
+ A
+*/
+xor_refute_right_rule :: (inputs: []*Formula, claimed: *Formula) -> *Formula {
+    if inputs.count != 2 {
+        print("XOR_REFUTE_RIGHT requires 2 inputs: (A xor B) and (B -> contradiction)\n");
+        return null;
+    }
+
+    if inputs[0].kind != .XOR {
+        print("XOR_REFUTE_RIGHT: first input must be an XOR\n");
+        return null;
+    }
+
+    if inputs[1].kind != .IMPLIES {
+        print("XOR_REFUTE_RIGHT: second input must be an implication\n");
+        return null;
+    }
+
+    A := inputs[0].xor_formula.l;
+    B := inputs[0].xor_formula.r;
+    branch := inputs[1].implies;
+
+    if formula_to_string(claimed) != formula_to_string(A) {
+        print("XOR_REFUTE_RIGHT: claimed formula must be the left side of the XOR\n");
+        return null;
+    }
+
+    if formula_to_string(branch.l) != formula_to_string(B) {
+        print("XOR_REFUTE_RIGHT: implication must assume the right side of the XOR\n");
+        return null;
+    }
+
+    if branch.r.kind != .RELATION || branch.r.relation.R != "contradiction" || branch.r.relation.args.count != 0 {
+        print("XOR_REFUTE_RIGHT: implication must derive contradiction\n");
+        return null;
+    }
+
+    return claimed;
+}
+
+/*
+ A or B
+ B -> contradiction
+ ------
+ A
+*/
+or_refute_right_rule :: (inputs: []*Formula, claimed: *Formula) -> *Formula {
+    if inputs.count != 2 {
+        print("OR_REFUTE_RIGHT requires 2 inputs: (A or B) and (B -> contradiction)\n");
+        return null;
+    }
+
+    if inputs[0].kind != .OR {
+        print("OR_REFUTE_RIGHT: first input must be an OR\n");
+        return null;
+    }
+
+    if inputs[1].kind != .IMPLIES {
+        print("OR_REFUTE_RIGHT: second input must be an implication\n");
+        return null;
+    }
+
+    A := inputs[0].or_formula.l;
+    B := inputs[0].or_formula.r;
+    branch := inputs[1].implies;
+
+    if formula_to_string(claimed) != formula_to_string(A) {
+        print("OR_REFUTE_RIGHT: claimed formula must be the left side of the OR\n");
+        return null;
+    }
+
+    if formula_to_string(branch.l) != formula_to_string(B) {
+        print("OR_REFUTE_RIGHT: implication must assume the right side of the OR\n");
+        return null;
+    }
+
+    if branch.r.kind != .RELATION || branch.r.relation.R != "contradiction" || branch.r.relation.args.count != 0 {
+        print("OR_REFUTE_RIGHT: implication must derive contradiction\n");
+        return null;
+    }
+
+    return claimed;
+}
+
+/*
+ P(0) or P(1)
  forall k in N, P(k) => P(k+1)
  ------
  forall n in N, P(n)
 */
 induction_rule :: (inputs: []*Formula, claimed: *Formula) -> *Formula {
     if inputs.count != 2 {
-        print("INDUCTION requires 2 inputs: base P(0) and step ∀k(P(k) → P(k+1))\n");
+        print("INDUCTION requires 2 inputs: base P(0)/P(1) and step forall k(P(k) -> P(k+1))\n");
         return null;
     }
     
@@ -335,12 +599,14 @@ induction_rule :: (inputs: []*Formula, claimed: *Formula) -> *Formula {
     var_term := make_variable(var);
     succ_term := make_function("+", var_term, make_constant("1"));
     zero_term := make_constant("0");
+    one_term := make_constant("1");
     
     Pk := implies_f.l;
     
     P0 := substitute_in_formula(Pk, var_term, zero_term);
-    if formula_to_string(P0) != formula_to_string(base) {
-        print("Base mismatch: expected % but got %\n", formula_to_string(base), formula_to_string(P0));
+    P1 := substitute_in_formula(Pk, var_term, one_term);
+    if formula_to_string(P0) != formula_to_string(base) && formula_to_string(P1) != formula_to_string(base) {
+        print("Base mismatch: expected % but got neither % nor %\n", formula_to_string(base), formula_to_string(P0), formula_to_string(P1));
         return null;
     }
     
@@ -353,14 +619,141 @@ induction_rule :: (inputs: []*Formula, claimed: *Formula) -> *Formula {
     n_term := make_variable("n");
     Pn := substitute_in_formula(Pk, var_term, n_term);
     
-    natural_numbers := make_constant(SYM_NAT);
-    result := make_forall("n", natural_numbers, Pn);
+    result := make_forall("n", forall_f.domain, Pn);
     
     if formula_to_string(claimed) != formula_to_string(result) {
         print("Claimed % does not match derived %\n", formula_to_string(claimed), formula_to_string(result));
         return null;
     }
     
+    return claimed;
+}
+
+/*
+ P(start)
+ forall i in N, ((start <= i) and (i < end)) -> (P(i) -> P(i+1))
+ ------
+ forall n in N, ((start <= n) and (n <= end)) -> P(n)
+*/
+finite_induction_rule :: (inputs: []*Formula, claimed: *Formula) -> *Formula {
+    if inputs.count != 2 {
+        print("FINITE_INDUCTION requires base P(start) and finite step forall i\n");
+        return null;
+    }
+
+    if claimed.kind != .FORALL {
+        print("FINITE_INDUCTION claimed statement must be a forall\n");
+        return null;
+    }
+
+    n_name := claimed.forall.v;
+    n_term := make_variable(n_name);
+
+    if claimed.forall.inner.kind != .IMPLIES {
+        print("FINITE_INDUCTION forall body must be range -> P(n)\n");
+        return null;
+    }
+
+    target_impl := claimed.forall.inner;
+    if target_impl.implies.l.kind != .AND {
+        print("FINITE_INDUCTION range must be (start <= n) and (n <= end)\n");
+        return null;
+    }
+
+    lower_bound := target_impl.implies.l.and_formula.l;
+    upper_bound := target_impl.implies.l.and_formula.r;
+
+    if lower_bound.kind != .RELATION || lower_bound.relation.R != SYM_LEQ || lower_bound.relation.args.count != 2 {
+        print("FINITE_INDUCTION lower bound must be start <= n\n");
+        return null;
+    }
+
+    if upper_bound.kind != .RELATION || upper_bound.relation.R != SYM_LEQ || upper_bound.relation.args.count != 2 {
+        print("FINITE_INDUCTION upper bound must be n <= end\n");
+        return null;
+    }
+
+    start := lower_bound.relation.args[0];
+    lower_var := lower_bound.relation.args[1];
+    upper_var := upper_bound.relation.args[0];
+    end := upper_bound.relation.args[1];
+
+    if term_to_string(lower_var) != term_to_string(n_term) || term_to_string(upper_var) != term_to_string(n_term) {
+        print("FINITE_INDUCTION range must bind the claimed forall variable\n");
+        return null;
+    }
+
+    Pn := target_impl.implies.r;
+    expected_base := substitute_in_formula(Pn, n_term, start);
+    if formula_to_string(inputs[0]) != formula_to_string(expected_base) {
+        print("FINITE_INDUCTION base mismatch: expected % but got %\n", formula_to_string(expected_base), formula_to_string(inputs[0]));
+        return null;
+    }
+
+    if inputs[1].kind != .FORALL {
+        print("FINITE_INDUCTION step must be a forall\n");
+        return null;
+    }
+
+    step_forall := inputs[1].forall;
+    if term_to_string(step_forall.domain) != term_to_string(claimed.forall.domain) {
+        print("FINITE_INDUCTION step domain must match claimed domain\n");
+        return null;
+    }
+
+    i_term := make_variable(step_forall.v);
+    i_plus_one := make_function("+", i_term, make_constant("1"));
+
+    Pi := substitute_in_formula(Pn, n_term, i_term);
+    Psucc := substitute_in_formula(Pn, n_term, i_plus_one);
+
+    step_range := make_and(
+        make_rel(SYM_LEQ, start, i_term),
+        make_rel("<", i_term, end)
+    );
+    expected_step := make_implies(step_range, make_implies(Pi, Psucc));
+
+    if formula_to_string(step_forall.inner) != formula_to_string(expected_step) {
+        print("FINITE_INDUCTION step mismatch: expected % but got %\n", formula_to_string(expected_step), formula_to_string(step_forall.inner));
+        return null;
+    }
+
+    return claimed;
+}
+
+/*
+ P(a)
+ P(b)
+ P(c)
+ ------
+ forall x in {a, b, c}, P(x)
+*/
+finite_forall_rule :: (inputs: []*Formula, claimed: *Formula) -> *Formula {
+    if claimed.kind != .FORALL {
+        print("FINITE_FORALL claimed statement must be a forall\n");
+        return null;
+    }
+
+    domain := claimed.forall.domain;
+    if domain.kind != .FINITE_SET {
+        print("FINITE_FORALL domain must be a finite set\n");
+        return null;
+    }
+
+    if inputs.count != domain.finite_set.elements.count {
+        print("FINITE_FORALL input count must match finite set size\n");
+        return null;
+    }
+
+    var_term := make_variable(claimed.forall.v);
+    for element, i: domain.finite_set.elements {
+        expected := substitute_in_formula(claimed.forall.inner, var_term, element);
+        if formula_to_string(inputs[i]) != formula_to_string(expected) {
+            print("FINITE_FORALL input % mismatch: expected % but got %\n", i, formula_to_string(expected), formula_to_string(inputs[i]));
+            return null;
+        }
+    }
+
     return claimed;
 }
 
@@ -412,6 +805,12 @@ print_proof :: (proof: *Proof) {
     if proof.targets.count == 0 {
         print("  <all targets completed>\n");
     }
+    if proof.suspended_targets.count > 0 {
+        print("Suspended targets:\n");
+        for target, i: proof.suspended_targets {
+            print("  [%] %\n", i, formula_to_string(target));
+        }
+    }
     
     print("=======================\n");
 }
@@ -430,12 +829,30 @@ create_proof :: (assumptions: []*Formula, target: *Formula) -> Proof {
         // This is a simplified version - in practice you'd need context
         return claimed;
     });
+    register_rule(*proof, "IMPLIES_ASSUMPTION", (inputs: []*Formula, claimed: *Formula) -> *Formula {
+        return claimed;
+    });
+    register_rule(*proof, "FORALL_ASSUMPTION", (inputs: []*Formula, claimed: *Formula) -> *Formula {
+        return claimed;
+    });
     // TODO: we should replace these with enums so that we get proper errors, lazy for now
     register_rule(*proof, "IMPLIES", implies_rule);
+    register_rule(*proof, "IMPLIES_INTRO", implies_intro_line_rule);
     register_rule(*proof, "FORALL", forall_rule);
     register_rule(*proof, "GENERALIZED_FORALL", generalized_forall_rule);
     register_rule(*proof, "EQ", eq_rule);
     register_rule(*proof, "AND", and_rule);
+    register_rule(*proof, "AND_LEFT", and_left_rule);
+    register_rule(*proof, "AND_RIGHT", and_right_rule);
+    register_rule(*proof, "LEM", excluded_middle_rule);
+    register_rule(*proof, "CONTRADICTION", contradiction_rule);
+    register_rule(*proof, "XOR_BOTH", xor_both_rule);
+    register_rule(*proof, "OR_ELIM", or_elim_rule);
+    register_rule(*proof, "OR_REFUTE_RIGHT", or_refute_right_rule);
+    register_rule(*proof, "XOR_REFUTE_RIGHT", xor_refute_right_rule);
+    register_rule(*proof, "INDUCTION", induction_rule);
+    register_rule(*proof, "FINITE_INDUCTION", finite_induction_rule);
+    register_rule(*proof, "FINITE_FORALL", finite_forall_rule);
     
     return proof;
 }
@@ -466,8 +883,25 @@ add_line_to_proof :: (proof: *Proof, claimed: *Formula, rule_name: string, deps:
             }
         }
         if !found {
-            print("Invalid assumption: %\n", formula_to_string(claimed));
-            return;
+            if rule_name != "IMPLIES_ASSUMPTION" && rule_name != "FORALL_ASSUMPTION" {
+                print("Invalid assumption: %\n", formula_to_string(claimed));
+                return;
+            }
+        }
+
+        if !found {
+            array_add(*proof.assumptions, claimed);
+        }
+    } else if rule_name == "IMPLIES_ASSUMPTION" || rule_name == "FORALL_ASSUMPTION" {
+        found := false;
+        for a: proof.assumptions {
+            if formula_to_string(a) == formula_to_string(claimed) {
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            array_add(*proof.assumptions, claimed);
         }
     } else {
         derived := (rule.*)(dep_statements, claimed);
@@ -492,9 +926,30 @@ add_line_to_proof :: (proof: *Proof, claimed: *Formula, rule_name: string, deps:
             if proof.active_target_idx >= i && proof.active_target_idx > 0 {
                 proof.active_target_idx -= 1;
             }
+            if proof.targets.count == 0 && proof.suspended_targets.count > 0 {
+                restored := proof.suspended_targets[proof.suspended_targets.count - 1];
+                array_ordered_remove_by_index(*proof.suspended_targets, proof.suspended_targets.count - 1);
+                array_add(*proof.targets, restored);
+                proof.active_target_idx = 0;
+            }
             break;
         }
     }
+}
+
+begin_subproof :: (proof: *Proof, subgoal: *Formula) {
+    current_goal := get_active_target(proof);
+    if !current_goal return;
+
+    array_add(*proof.suspended_targets, current_goal);
+
+    old_targets: [..]*Formula;
+    for t: proof.targets {
+        array_add(*old_targets, t);
+    }
+    array_add(*proof.target_history, old_targets);
+
+    proof.targets[proof.active_target_idx] = subgoal;
 }
 
 // instantiations all modify the target.
@@ -513,8 +968,7 @@ instantiate_forall :: (proof: *Proof, requested_variable: *Term = null) {
     
     arbitrary_variable := ifx requested_variable then requested_variable else make_variable(current_goal.forall.v);
     
-    N := make_constant(SYM_NAT);
-    membership_assumption := make_rel(SYM_IN, arbitrary_variable, N);
+    membership_assumption := make_rel(SYM_IN, arbitrary_variable, current_goal.forall.domain);
     array_add(*proof.assumptions, membership_assumption);
     
     bound_var := make_variable(current_goal.forall.v);
@@ -562,10 +1016,10 @@ instantiate_induction :: (proof: *Proof) {
     var := current_goal.forall.v;
     Pn := current_goal.forall.inner;
     
-    // Base case: P(0)
-    zero_term := make_constant("0");
+    // Base case: P(1)
+    one_term := make_constant("1");
     var_term := make_variable(var);
-    P0 := substitute_in_formula(Pn, var_term, zero_term);
+    P1 := substitute_in_formula(Pn, var_term, one_term);
     
     // Step case: ∀k (P(k) → P(k+1))
     k_term := make_variable("k");
@@ -574,8 +1028,7 @@ instantiate_induction :: (proof: *Proof) {
     Psucc := substitute_in_formula(Pn, var_term, succ_term);
     step_impl := make_implies(Pk, Psucc);
     
-    natural_numbers := make_constant(SYM_NAT);
-    step_forall := make_forall("k", natural_numbers, step_impl);
+    step_forall := make_forall("k", current_goal.forall.domain, step_impl);
     
     old_targets: [..]*Formula;
     for t: proof.targets {
@@ -583,7 +1036,7 @@ instantiate_induction :: (proof: *Proof) {
     }
     array_add(*proof.target_history, old_targets);
     
-    proof.targets[proof.active_target_idx] = P0;
+    proof.targets[proof.active_target_idx] = P1;
     array_add(*proof.targets, step_forall);
 }
 
@@ -609,6 +1062,44 @@ rewrite_target_using_equality :: (proof: *Proof, equality_proof_line: int) {
     
     current_goal := proof.targets[proof.active_target_idx];
     new_goal := substitute_term_in_formula(current_goal, lhs, rhs);
+    
+    old_targets: [..]*Formula;
+    for t: proof.targets {
+        array_add(*old_targets, t);
+    }
+    array_add(*proof.target_history, old_targets);
+    
+    proof.targets[proof.active_target_idx] = new_goal;
+}
+
+rewrite_target_using_equality_occurrence :: (proof: *Proof, equality_proof_line: int, occurrence: int) {
+    if proof.targets.count == 0 {
+        print("No active goals to rewrite\n");
+        return;
+    }
+    
+    if equality_proof_line < 0 || equality_proof_line >= proof.lines.count {
+        print("Invalid equality line index\n");
+        return;
+    }
+    
+    equality_formula := proof.lines[equality_proof_line].statement;
+    if equality_formula.kind != .EQUALITY {
+        print("Selected line is not an equality\n");
+        return;
+    }
+    
+    lhs := equality_formula.equality.l;
+    rhs := equality_formula.equality.r;
+    
+    current_goal := proof.targets[proof.active_target_idx];
+    seen := 0;
+    new_goal := substitute_term_occurrence_in_formula(current_goal, lhs, rhs, occurrence, *seen);
+    
+    if seen <= occurrence {
+        print("Rewrite occurrence % was not found; only saw % occurrence(s)\n", occurrence, seen);
+        return;
+    }
     
     old_targets: [..]*Formula;
     for t: proof.targets {

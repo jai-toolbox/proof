@@ -3,6 +3,7 @@ Formula_Kind :: enum {
     RELATION;
     NOT;
     OR;
+    XOR;
     AND;
     IMPLIES;
     FORALL;
@@ -24,6 +25,11 @@ Not_Formula :: struct {
 }
 
 Or_Formula :: struct {
+    l: *Formula;
+    r: *Formula;
+}
+
+Xor_Formula :: struct {
     l: *Formula;
     r: *Formula;
 }
@@ -59,6 +65,7 @@ Formula :: struct {
         relation: Relation_Formula;
         not_formula: Not_Formula;
         or_formula: Or_Formula;
+        xor_formula: Xor_Formula;
         and_formula: And_Formula;
         implies: Implies_Formula;
         forall: Forall_Formula;
@@ -106,6 +113,14 @@ make_or :: (a: *Formula, b: *Formula) -> *Formula {
     f.kind = .OR;
     f.or_formula.l = a;
     f.or_formula.r = b;
+    return f;
+}
+
+make_xor :: (a: *Formula, b: *Formula) -> *Formula {
+    f := New(Formula);
+    f.kind = .XOR;
+    f.xor_formula.l = a;
+    f.xor_formula.r = b;
     return f;
 }
 
@@ -195,6 +210,16 @@ formula_to_string :: (f: *Formula) -> string {
             append(*builder, formula_to_string(f.or_formula.r));
             append(*builder, ")");
             return builder_to_string(*builder);
+
+        case .XOR;
+            append(*builder, "(");
+            append(*builder, formula_to_string(f.xor_formula.l));
+            append(*builder, " ");
+            append(*builder, SYM_XOR);
+            append(*builder, " ");
+            append(*builder, formula_to_string(f.xor_formula.r));
+            append(*builder, ")");
+            return builder_to_string(*builder);
             
         case .AND;
             append(*builder, "(");
@@ -225,7 +250,8 @@ formula_to_string :: (f: *Formula) -> string {
             append(*builder, SYM_IN);
             append(*builder, " ");
             append(*builder, term_to_string(f.forall.domain));
-            append(*builder, ")(");
+            append(*builder, ") ");
+            append(*builder, "(");
             append(*builder, formula_to_string(f.forall.inner));
             append(*builder, ")");
             return builder_to_string(*builder);
@@ -273,6 +299,9 @@ formula_is_well_formed :: (f: *Formula, err: *string = null) -> bool {
             
         case .OR;
             return formula_is_well_formed(f.or_formula.l, err) && formula_is_well_formed(f.or_formula.r, err);
+
+        case .XOR;
+            return formula_is_well_formed(f.xor_formula.l, err) && formula_is_well_formed(f.xor_formula.r, err);
             
         case .AND;
             return formula_is_well_formed(f.and_formula.l, err) && formula_is_well_formed(f.and_formula.r, err);
@@ -316,6 +345,9 @@ is_free_in :: (v: string, f: *Formula) -> bool {
             
         case .OR;
             return is_free_in(v, f.or_formula.l) || is_free_in(v, f.or_formula.r);
+
+        case .XOR;
+            return is_free_in(v, f.xor_formula.l) || is_free_in(v, f.xor_formula.r);
             
         case .AND;
             return is_free_in(v, f.and_formula.l) || is_free_in(v, f.and_formula.r);
@@ -353,6 +385,10 @@ collect_vars_in_formula :: (f: *Formula, vars: *Table(string, bool)) {
         case .OR;
             collect_vars_in_formula(f.or_formula.l, vars);
             collect_vars_in_formula(f.or_formula.r, vars);
+
+        case .XOR;
+            collect_vars_in_formula(f.xor_formula.l, vars);
+            collect_vars_in_formula(f.xor_formula.r, vars);
             
         case .AND;
             collect_vars_in_formula(f.and_formula.l, vars);
@@ -403,6 +439,11 @@ substitute_term_in_formula :: (phi: *Formula, pattern: *Term, replacement: *Term
             new_l := substitute_term_in_formula(phi.or_formula.l, pattern, replacement);
             new_r := substitute_term_in_formula(phi.or_formula.r, pattern, replacement);
             return make_or(new_l, new_r);
+
+        case .XOR;
+            new_l := substitute_term_in_formula(phi.xor_formula.l, pattern, replacement);
+            new_r := substitute_term_in_formula(phi.xor_formula.r, pattern, replacement);
+            return make_xor(new_l, new_r);
             
         case .AND;
             new_l := substitute_term_in_formula(phi.and_formula.l, pattern, replacement);
@@ -421,6 +462,57 @@ substitute_term_in_formula :: (phi: *Formula, pattern: *Term, replacement: *Term
         case .EXISTS;
             return make_exists(phi.exists.v, phi.exists.domain,
                               substitute_term_in_formula(phi.exists.inner, pattern, replacement));
+    }
+    
+    return null;
+}
+
+substitute_term_occurrence_in_formula :: (phi: *Formula, pattern: *Term, replacement: *Term, target_occurrence: int, seen: *int) -> *Formula {
+    if !phi return null;
+    
+    if phi.kind == {
+        case .EQUALITY;
+            new_l := substitute_term_occurrence_in_term(phi.equality.l, pattern, replacement, target_occurrence, seen);
+            new_r := substitute_term_occurrence_in_term(phi.equality.r, pattern, replacement, target_occurrence, seen);
+            return make_eq(new_l, new_r);
+            
+        case .RELATION;
+            new_args: [..]*Term;
+            for arg: phi.relation.args {
+                array_add(*new_args, substitute_term_occurrence_in_term(arg, pattern, replacement, target_occurrence, seen));
+            }
+            return make_rel_from_array(phi.relation.R, new_args);
+            
+        case .NOT;
+            return make_not(substitute_term_occurrence_in_formula(phi.not_formula.inner, pattern, replacement, target_occurrence, seen));
+            
+        case .OR;
+            new_l := substitute_term_occurrence_in_formula(phi.or_formula.l, pattern, replacement, target_occurrence, seen);
+            new_r := substitute_term_occurrence_in_formula(phi.or_formula.r, pattern, replacement, target_occurrence, seen);
+            return make_or(new_l, new_r);
+
+        case .XOR;
+            new_l := substitute_term_occurrence_in_formula(phi.xor_formula.l, pattern, replacement, target_occurrence, seen);
+            new_r := substitute_term_occurrence_in_formula(phi.xor_formula.r, pattern, replacement, target_occurrence, seen);
+            return make_xor(new_l, new_r);
+            
+        case .AND;
+            new_l := substitute_term_occurrence_in_formula(phi.and_formula.l, pattern, replacement, target_occurrence, seen);
+            new_r := substitute_term_occurrence_in_formula(phi.and_formula.r, pattern, replacement, target_occurrence, seen);
+            return make_and(new_l, new_r);
+            
+        case .IMPLIES;
+            new_l := substitute_term_occurrence_in_formula(phi.implies.l, pattern, replacement, target_occurrence, seen);
+            new_r := substitute_term_occurrence_in_formula(phi.implies.r, pattern, replacement, target_occurrence, seen);
+            return make_implies(new_l, new_r);
+            
+        case .FORALL;
+            return make_forall(phi.forall.v, phi.forall.domain, 
+                              substitute_term_occurrence_in_formula(phi.forall.inner, pattern, replacement, target_occurrence, seen));
+            
+        case .EXISTS;
+            return make_exists(phi.exists.v, phi.exists.domain,
+                              substitute_term_occurrence_in_formula(phi.exists.inner, pattern, replacement, target_occurrence, seen));
     }
     
     return null;
@@ -450,6 +542,11 @@ substitute_in_formula :: (phi: *Formula, var: *Term, t: *Term) -> *Formula {
             new_l := substitute_in_formula(phi.or_formula.l, var, t);
             new_r := substitute_in_formula(phi.or_formula.r, var, t);
             return make_or(new_l, new_r);
+
+        case .XOR;
+            new_l := substitute_in_formula(phi.xor_formula.l, var, t);
+            new_r := substitute_in_formula(phi.xor_formula.r, var, t);
+            return make_xor(new_l, new_r);
             
         case .AND;
             new_l := substitute_in_formula(phi.and_formula.l, var, t);
@@ -494,6 +591,9 @@ is_substitutable :: (phi: *Formula, var: *Term, t: *Term) -> bool {
             
         case .OR;
             return is_substitutable(phi.or_formula.l, var, t) && is_substitutable(phi.or_formula.r, var, t);
+
+        case .XOR;
+            return is_substitutable(phi.xor_formula.l, var, t) && is_substitutable(phi.xor_formula.r, var, t);
             
         case .AND;
             return is_substitutable(phi.and_formula.l, var, t) && is_substitutable(phi.and_formula.r, var, t);
@@ -537,6 +637,8 @@ copy_formula :: (f: *Formula) -> *Formula {
             return make_not(copy_formula(f.not_formula.inner));
         case .OR;
             return make_or(copy_formula(f.or_formula.l), copy_formula(f.or_formula.r));
+        case .XOR;
+            return make_xor(copy_formula(f.xor_formula.l), copy_formula(f.xor_formula.r));
         case .AND;
             return make_and(copy_formula(f.and_formula.l), copy_formula(f.and_formula.r));
         case .IMPLIES;
@@ -566,6 +668,9 @@ free_formula :: (f: *Formula) {
         case .OR;
             free_formula(f.or_formula.l);
             free_formula(f.or_formula.r);
+        case .XOR;
+            free_formula(f.xor_formula.l);
+            free_formula(f.xor_formula.r);
         case .AND;
             free_formula(f.and_formula.l);
             free_formula(f.and_formula.r);

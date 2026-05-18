@@ -7,6 +7,7 @@ SYM_EXISTS :: "exists";
 SYM_IN     :: "in";
 SYM_NOT    :: "not ";
 SYM_OR     :: " or ";
+SYM_XOR    :: " xor ";
 SYM_AND    :: " and ";
 SYM_IMPL   :: " implies ";
 SYM_NAT    :: "Nat";
@@ -26,15 +27,39 @@ is_variable :: (s: string) -> bool {
 }
 
 is_constant_ :: (s: string) -> bool {
-    return s == "0" || s == "1";
+    if s.count == 0 return false;
+    for c: s {
+        if !is_digit_(c) return false;
+    }
+    return true;
 }
 
 is_function :: (s: string, arity: int) -> bool {
-    return (s == "succ" && arity == 1) || (s == "+" && arity == 2) || (s == "*" && arity == 2);
+    return (s == "succ" && arity == 1) ||
+           (s == "sum" && arity == 1) ||
+           (s == "sum_of_1_to_n" && arity == 1) ||
+           (s == "hits" && arity == 1) ||
+           (s == "ES" && arity == 1) ||
+           (s == "va" && arity == 2) ||
+           (s == "domain" && arity == 1) ||
+           (s == "image" && arity == 1) ||
+           (s == "card" && arity == 1) ||
+           (s == "+" && arity == 2) ||
+           (s == "-" && arity == 2) ||
+           (s == "*" && arity == 2) ||
+           (s == "/" && arity == 2);
 }
 
 is_relation :: (s: string, arity: int) -> bool {
-    return s == "<" && arity == 2;
+    return (s == "<" && arity == 2) ||
+           (s == ">" && arity == 2) ||
+           (s == "<=" && arity == 2) ||
+           (s == ">=" && arity == 2) ||
+           (s == "==" && arity == 2) ||
+           (s == "!=" && arity == 2) ||
+           (s == "truthy" && arity == 1) ||
+           (s == "contradiction" && arity == 0) ||
+           (s == "function_type" && arity == 3);
 }
 
 // todo I think jai already has this function.
