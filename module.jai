@@ -8,6 +8,7 @@ SYM_IN     :: "in";
 SYM_NOT    :: "not ";
 SYM_OR     :: " or ";
 SYM_XOR    :: " xor ";
+SYM_IFF    :: " iff ";
 SYM_AND    :: " and ";
 SYM_IMPL   :: " implies ";
 SYM_NAT    :: "Nat";

@@ -4,6 +4,7 @@ Formula_Kind :: enum {
     NOT;
     OR;
     XOR;
+    IFF;
     AND;
     IMPLIES;
     FORALL;
@@ -30,6 +31,11 @@ Or_Formula :: struct {
 }
 
 Xor_Formula :: struct {
+    l: *Formula;
+    r: *Formula;
+}
+
+Iff_Formula :: struct {
     l: *Formula;
     r: *Formula;
 }
@@ -66,6 +72,7 @@ Formula :: struct {
         not_formula: Not_Formula;
         or_formula: Or_Formula;
         xor_formula: Xor_Formula;
+        iff_formula: Iff_Formula;
         and_formula: And_Formula;
         implies: Implies_Formula;
         forall: Forall_Formula;
@@ -124,6 +131,14 @@ make_xor :: (a: *Formula, b: *Formula) -> *Formula {
     return f;
 }
 
+make_iff :: (a: *Formula, b: *Formula) -> *Formula {
+    f := New(Formula);
+    f.kind = .IFF;
+    f.iff_formula.l = a;
+    f.iff_formula.r = b;
+    return f;
+}
+
 make_and :: (a: *Formula, b: *Formula) -> *Formula {
     f := New(Formula);
     f.kind = .AND;
@@ -158,6 +173,82 @@ make_exists :: (v: string, domain: *Term, inner: *Formula) -> *Formula {
     return f;
 }
 
+forall_chain_to_string :: (f: *Formula) -> string {
+    builder: String_Builder;
+
+    current := f;
+    first_group := true;
+    while current && current.kind == .FORALL {
+        if !first_group append(*builder, " ");
+        first_group = false;
+
+        domain_string := term_to_string(current.forall.domain);
+        append(*builder, "(");
+        append(*builder, SYM_FORALL);
+        append(*builder, " ");
+        append(*builder, current.forall.v);
+
+        inner := current.forall.inner;
+        while inner && inner.kind == .FORALL && term_to_string(inner.forall.domain) == domain_string {
+            append(*builder, ", ");
+            append(*builder, inner.forall.v);
+            inner = inner.forall.inner;
+        }
+
+        append(*builder, " ");
+        append(*builder, SYM_IN);
+        append(*builder, " ");
+        append(*builder, domain_string);
+        append(*builder, ")");
+
+        current = inner;
+    }
+
+    append(*builder, " (");
+    append(*builder, formula_to_string(current));
+    append(*builder, ")");
+
+    return builder_to_string(*builder);
+}
+
+exists_chain_to_string :: (f: *Formula) -> string {
+    builder: String_Builder;
+
+    current := f;
+    first_group := true;
+    while current && current.kind == .EXISTS {
+        if !first_group append(*builder, " ");
+        first_group = false;
+
+        domain_string := term_to_string(current.exists.domain);
+        append(*builder, "(");
+        append(*builder, SYM_EXISTS);
+        append(*builder, " ");
+        append(*builder, current.exists.v);
+
+        inner := current.exists.inner;
+        while inner && inner.kind == .EXISTS && term_to_string(inner.exists.domain) == domain_string {
+            append(*builder, ", ");
+            append(*builder, inner.exists.v);
+            inner = inner.exists.inner;
+        }
+
+        append(*builder, " ");
+        append(*builder, SYM_IN);
+        append(*builder, " ");
+        append(*builder, domain_string);
+        append(*builder, ")");
+
+        current = inner;
+    }
+
+    append(*builder, " (");
+    append(*builder, formula_to_string(current));
+    append(*builder, ")");
+
+    return builder_to_string(*builder);
+}
+
 formula_to_string :: (f: *Formula) -> string {
     if !f return "?";
     
@@ -165,24 +256,22 @@ formula_to_string :: (f: *Formula) -> string {
     
     if f.kind == {
         case .EQUALITY;
-            append(*builder, "(");
             append(*builder, term_to_string(f.equality.l));
             append(*builder, " = ");
             append(*builder, term_to_string(f.equality.r));
-            append(*builder, ")");
             return builder_to_string(*builder);
             
         case .RELATION;
             is_infix := (f.relation.R == "=" || f.relation.R == SYM_IN || 
                         f.relation.R == "<" || f.relation.R == SYM_LEQ || f.relation.R == ">");
             if is_infix && f.relation.args.count == 2 {
-                append(*builder, "(");
                 append(*builder, term_to_string(f.relation.args[0]));
                 append(*builder, " ");
                 append(*builder, f.relation.R);
                 append(*builder, " ");
                 append(*builder, term_to_string(f.relation.args[1]));
-                append(*builder, ")");
+            } else if f.relation.args.count == 0 && f.relation.R != "contradiction" {
+                append(*builder, f.relation.R);
             } else {
                 append(*builder, f.relation.R);
                 append(*builder, "(");
@@ -220,6 +309,16 @@ formula_to_string :: (f: *Formula) -> string {
             append(*builder, formula_to_string(f.xor_formula.r));
             append(*builder, ")");
             return builder_to_string(*builder);
+
+        case .IFF;
+            append(*builder, "(");
+            append(*builder, formula_to_string(f.iff_formula.l));
+            append(*builder, " ");
+            append(*builder, SYM_IFF);
+            append(*builder, " ");
+            append(*builder, formula_to_string(f.iff_formula.r));
+            append(*builder, ")");
+            return builder_to_string(*builder);
             
         case .AND;
             append(*builder, "(");
@@ -242,33 +341,10 @@ formula_to_string :: (f: *Formula) -> string {
             return builder_to_string(*builder);
             
         case .FORALL;
-            append(*builder, "(");
-            append(*builder, SYM_FORALL);
-            append(*builder, " ");
-            append(*builder, f.forall.v);
-            append(*builder, " ");
-            append(*builder, SYM_IN);
-            append(*builder, " ");
-            append(*builder, term_to_string(f.forall.domain));
-            append(*builder, ") ");
-            append(*builder, "(");
-            append(*builder, formula_to_string(f.forall.inner));
-            append(*builder, ")");
-            return builder_to_string(*builder);
+            return forall_chain_to_string(f);
             
         case .EXISTS;
-            append(*builder, "(");
-            append(*builder, SYM_EXISTS);
-            append(*builder, " ");
-            append(*builder, f.exists.v);
-            append(*builder, " ");
-            append(*builder, SYM_IN);
-            append(*builder, " ");
-            append(*builder, term_to_string(f.exists.domain));
-            append(*builder, ")(");
-            append(*builder, formula_to_string(f.exists.inner));
-            append(*builder, ")");
-            return builder_to_string(*builder);
+            return exists_chain_to_string(f);
     }
     
     return "?";
@@ -302,6 +378,9 @@ formula_is_well_formed :: (f: *Formula, err: *string = null) -> bool {
 
         case .XOR;
             return formula_is_well_formed(f.xor_formula.l, err) && formula_is_well_formed(f.xor_formula.r, err);
+
+        case .IFF;
+            return formula_is_well_formed(f.iff_formula.l, err) && formula_is_well_formed(f.iff_formula.r, err);
             
         case .AND;
             return formula_is_well_formed(f.and_formula.l, err) && formula_is_well_formed(f.and_formula.r, err);
@@ -348,6 +427,9 @@ is_free_in :: (v: string, f: *Formula) -> bool {
 
         case .XOR;
             return is_free_in(v, f.xor_formula.l) || is_free_in(v, f.xor_formula.r);
+
+        case .IFF;
+            return is_free_in(v, f.iff_formula.l) || is_free_in(v, f.iff_formula.r);
             
         case .AND;
             return is_free_in(v, f.and_formula.l) || is_free_in(v, f.and_formula.r);
@@ -389,6 +471,10 @@ collect_vars_in_formula :: (f: *Formula, vars: *Table(string, bool)) {
         case .XOR;
             collect_vars_in_formula(f.xor_formula.l, vars);
             collect_vars_in_formula(f.xor_formula.r, vars);
+
+        case .IFF;
+            collect_vars_in_formula(f.iff_formula.l, vars);
+            collect_vars_in_formula(f.iff_formula.r, vars);
             
         case .AND;
             collect_vars_in_formula(f.and_formula.l, vars);
@@ -444,6 +530,11 @@ substitute_term_in_formula :: (phi: *Formula, pattern: *Term, replacement: *Term
             new_l := substitute_term_in_formula(phi.xor_formula.l, pattern, replacement);
             new_r := substitute_term_in_formula(phi.xor_formula.r, pattern, replacement);
             return make_xor(new_l, new_r);
+
+        case .IFF;
+            new_l := substitute_term_in_formula(phi.iff_formula.l, pattern, replacement);
+            new_r := substitute_term_in_formula(phi.iff_formula.r, pattern, replacement);
+            return make_iff(new_l, new_r);
             
         case .AND;
             new_l := substitute_term_in_formula(phi.and_formula.l, pattern, replacement);
@@ -495,6 +586,11 @@ substitute_term_occurrence_in_formula :: (phi: *Formula, pattern: *Term, replace
             new_l := substitute_term_occurrence_in_formula(phi.xor_formula.l, pattern, replacement, target_occurrence, seen);
             new_r := substitute_term_occurrence_in_formula(phi.xor_formula.r, pattern, replacement, target_occurrence, seen);
             return make_xor(new_l, new_r);
+
+        case .IFF;
+            new_l := substitute_term_occurrence_in_formula(phi.iff_formula.l, pattern, replacement, target_occurrence, seen);
+            new_r := substitute_term_occurrence_in_formula(phi.iff_formula.r, pattern, replacement, target_occurrence, seen);
+            return make_iff(new_l, new_r);
             
         case .AND;
             new_l := substitute_term_occurrence_in_formula(phi.and_formula.l, pattern, replacement, target_occurrence, seen);
@@ -547,6 +643,11 @@ substitute_in_formula :: (phi: *Formula, var: *Term, t: *Term) -> *Formula {
             new_l := substitute_in_formula(phi.xor_formula.l, var, t);
             new_r := substitute_in_formula(phi.xor_formula.r, var, t);
             return make_xor(new_l, new_r);
+
+        case .IFF;
+            new_l := substitute_in_formula(phi.iff_formula.l, var, t);
+            new_r := substitute_in_formula(phi.iff_formula.r, var, t);
+            return make_iff(new_l, new_r);
             
         case .AND;
             new_l := substitute_in_formula(phi.and_formula.l, var, t);
@@ -594,6 +695,9 @@ is_substitutable :: (phi: *Formula, var: *Term, t: *Term) -> bool {
 
         case .XOR;
             return is_substitutable(phi.xor_formula.l, var, t) && is_substitutable(phi.xor_formula.r, var, t);
+
+        case .IFF;
+            return is_substitutable(phi.iff_formula.l, var, t) && is_substitutable(phi.iff_formula.r, var, t);
             
         case .AND;
             return is_substitutable(phi.and_formula.l, var, t) && is_substitutable(phi.and_formula.r, var, t);
@@ -639,6 +743,8 @@ copy_formula :: (f: *Formula) -> *Formula {
             return make_or(copy_formula(f.or_formula.l), copy_formula(f.or_formula.r));
         case .XOR;
             return make_xor(copy_formula(f.xor_formula.l), copy_formula(f.xor_formula.r));
+        case .IFF;
+            return make_iff(copy_formula(f.iff_formula.l), copy_formula(f.iff_formula.r));
         case .AND;
             return make_and(copy_formula(f.and_formula.l), copy_formula(f.and_formula.r));
         case .IMPLIES;
@@ -671,6 +777,9 @@ free_formula :: (f: *Formula) {
         case .XOR;
             free_formula(f.xor_formula.l);
             free_formula(f.xor_formula.r);
+        case .IFF;
+            free_formula(f.iff_formula.l);
+            free_formula(f.iff_formula.r);
         case .AND;
             free_formula(f.and_formula.l);
             free_formula(f.and_formula.r);
